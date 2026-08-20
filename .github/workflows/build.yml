@@ -27,7 +27,7 @@ permissions:
 jobs:
   build:
     name: 'Build a package'
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v3
       - name: Show GitHub context
