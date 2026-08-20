@@ -86,7 +86,7 @@ if (!isMainThread) {
 
   function runInput(repetitions) {
     return new Promise((resolve, reject) => {
-      inputProcess = spawn(inputHelperPath, [String(repetitions), '75'], {
+      inputProcess = spawn(inputHelperPath, [String(repetitions), '100'], {
         stdio: 'inherit',
         windowsHide: true,
       });

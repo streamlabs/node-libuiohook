@@ -70,7 +70,7 @@ function sendCommand(action, generation) {
 
 function runInput(repetitions) {
   return new Promise((resolve, reject) => {
-    const child = spawn(inputHelperPath, [String(repetitions), '75'], {
+    const child = spawn(inputHelperPath, [String(repetitions), '100'], {
       stdio: 'inherit',
       windowsHide: true,
     });
