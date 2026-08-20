@@ -22,6 +22,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 SET(NODEJS_URL "https://artifacts.electronjs.org/headers/dist" CACHE STRING "Node.JS URL")
 SET(NODEJS_NAME "iojs" CACHE STRING "Node.JS Name")
+# TODO: Remove the Electron 29 build target and package dependency as soon as the Electron 43 migration is complete.
 SET(NODEJS_VERSION "v29.4.3" CACHE STRING "Node.JS Version")
 
 include(NodeJS)

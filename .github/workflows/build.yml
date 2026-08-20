@@ -52,6 +52,7 @@ jobs:
           INSTALL_PACKAGE_PATH: "${{env.BUILD_DIRECTORY}}/${{env.DISTRIBUTE_DIRECTORY}}/${{env.PACKAGE_DIRECTORY}}"
       - name: Build
         run: cmake --build "${{env.BUILD_DIRECTORY}}" --target install --config ${{env.BUILD_CONFIGURATION}}
+      # TODO: Remove the Electron 29 compatibility checks as soon as the Electron 43 migration is complete.
       - name: Install exact Electron 29 test runtime
         run: npm install --prefix "${{ runner.temp }}/electron29" --no-save electron@29.4.3
       - name: Test hotkey callbacks with Electron 29
