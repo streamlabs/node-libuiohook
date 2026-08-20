@@ -95,6 +95,11 @@ target_compile_definitions(
 	PRIVATE BUILDING_NODE_EXTENSION
 )
 
+option(NODE_LIBUIOHOOK_BUILD_TESTS "Build the Windows hotkey test helper" OFF)
+if(WIN32 AND NODE_LIBUIOHOOK_BUILD_TESTS)
+	add_executable(node_libuiohook_send_input "${PROJECT_SOURCE_DIR}/test/send_input_win.cpp")
+endif()
+
 set(CompilerFlags
         CMAKE_CXX_FLAGS
         CMAKE_CXX_FLAGS_DEBUG

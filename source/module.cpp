@@ -17,11 +17,23 @@
 
 void Init(Napi::Env env, Napi::Object exports)
 {
+#ifdef _WIN32
+	ThreadData *threadData = InitializeHotkeyThread(env);
+	if (threadData == nullptr)
+		return;
+
+	exports.Set(Napi::String::New(env, "startHook"), Napi::Function::New(env, StartHotkeyThreadJS, "startHook", threadData));
+	exports.Set(Napi::String::New(env, "stopHook"), Napi::Function::New(env, StopHotkeyThreadJS, "stopHook", threadData));
+	exports.Set(Napi::String::New(env, "registerCallback"), Napi::Function::New(env, RegisterHotkeyJS, "registerCallback", threadData));
+	exports.Set(Napi::String::New(env, "unregisterCallback"), Napi::Function::New(env, UnregisterHotkeyJS, "unregisterCallback", threadData));
+	exports.Set(Napi::String::New(env, "unregisterAllCallbacks"), Napi::Function::New(env, UnregisterHotkeysJS, "unregisterAllCallbacks", threadData));
+#else
 	exports.Set(Napi::String::New(env, "startHook"), Napi::Function::New(env, StartHotkeyThreadJS));
 	exports.Set(Napi::String::New(env, "stopHook"), Napi::Function::New(env, StopHotkeyThreadJS));
 	exports.Set(Napi::String::New(env, "registerCallback"), Napi::Function::New(env, RegisterHotkeyJS));
 	exports.Set(Napi::String::New(env, "unregisterCallback"), Napi::Function::New(env, UnregisterHotkeyJS));
 	exports.Set(Napi::String::New(env, "unregisterAllCallbacks"), Napi::Function::New(env, UnregisterHotkeysJS));
+#endif
 }
 
 Napi::Object main_node(Napi::Env env, Napi::Object exports)

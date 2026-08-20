@@ -25,3 +25,8 @@ Napi::Value StopHotkeyThreadJS(const Napi::CallbackInfo &info);
 Napi::Value RegisterHotkeyJS(const Napi::CallbackInfo &info);
 Napi::Value UnregisterHotkeyJS(const Napi::CallbackInfo &info);
 Napi::Value UnregisterHotkeysJS(const Napi::CallbackInfo &info);
+
+#ifdef _WIN32
+struct ThreadData;
+ThreadData *InitializeHotkeyThread(Napi::Env env);
+#endif
