@@ -4,6 +4,10 @@ function stringifyError(error) {
   return error instanceof Error ? error.stack : String(error);
 }
 
+function delay(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 if (!isMainThread) {
   const libuiohook = require(workerData.addonPath);
   let hookStarted = false;
@@ -151,6 +155,9 @@ if (!isMainThread) {
     });
 
     await ready;
+    // startHook() returns after creating the native polling thread, not after
+    // Windows has scheduled its first iteration.
+    await delay(500);
     const repetitions = 10;
     await Promise.all([runInput(repetitions), waitForCallbacks(repetitions * 2)]);
     assertCallbackSequence(repetitions);

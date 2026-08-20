@@ -61,6 +61,10 @@ struct ThreadData {
 	napi_env env = nullptr;
 	napi_threadsafe_function dispatcher = nullptr;
 	uint64_t nextGeneration = 0;
+	uint64_t nextRunEpoch = 0;
+	// Zero means that no polling run is active. Each start gets a distinct
+	// epoch because queued TSFN events can outlive the producer thread.
+	uint64_t activeRunEpoch = 0;
 	std::atomic<bool> shutdown{false};
 };
 
@@ -70,6 +74,7 @@ struct HotKeyEvent {
 	uint32_t key;
 	HotKeyEdge edge;
 	uint64_t generation;
+	uint64_t runEpoch;
 };
 
 static HotKeyCallback &GetCallback(HotKey &hotkey, HotKeyEdge edge)
@@ -87,6 +92,9 @@ static void DispatchHotKeyEvent(napi_env env, napi_value, void *context, void *d
 	napi_value callback = nullptr;
 	{
 		std::unique_lock<std::mutex> ulock(td->mtx);
+		if (td->activeRunEpoch == 0 || td->activeRunEpoch != event->runEpoch)
+			return;
+
 		auto hotkey = td->hotkeys.find(event->key);
 		if (hotkey == td->hotkeys.end())
 			return;
@@ -113,7 +121,7 @@ static void QueueHotKeyEvent(ThreadData *td, uint32_t key, HotKeyEdge edge, cons
 	if (td->dispatcher == nullptr || callback.callback == nullptr)
 		return;
 
-	HotKeyEvent *event = new (std::nothrow) HotKeyEvent{key, edge, callback.generation};
+	HotKeyEvent *event = new (std::nothrow) HotKeyEvent{key, edge, callback.generation, td->activeRunEpoch};
 	if (event == nullptr)
 		return;
 
@@ -147,6 +155,11 @@ static bool StopHotkeyThread(ThreadData *td)
 
 	td->shutdown.store(true, std::memory_order_release);
 	td->worker.join();
+
+	// Joining prevents new events but does not drain work already queued in the
+	// TSFN. Mark the run inactive so stopHook() is also a callback boundary.
+	std::unique_lock<std::mutex> ulock(td->mtx);
+	td->activeRunEpoch = 0;
 	return true;
 }
 
@@ -297,6 +310,9 @@ Napi::Value StartHotkeyThreadJS(const Napi::CallbackInfo &info)
 	std::unique_lock<std::mutex> ulock(td->mtx);
 	for (auto &hotkey : td->hotkeys)
 		hotkey.second.wasDown = false;
+	td->activeRunEpoch = ++td->nextRunEpoch;
+	if (td->activeRunEpoch == 0)
+		td->activeRunEpoch = ++td->nextRunEpoch;
 	td->shutdown.store(false, std::memory_order_release);
 	td->worker = std::thread(HotKeyThread, td);
 

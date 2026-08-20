@@ -117,9 +117,23 @@ async function runTest() {
   // before the polling thread starts so normalization cannot become an event.
   await runInput(0);
   await sendCommand('start-and-register', 1);
+  // startHook() creates the polling thread but cannot guarantee when Windows
+  // will first schedule it. Keep thread-start latency out of the edge checks.
+  await delay(500);
   const firstStart = callbacks.length;
   await Promise.all([runInput(25), waitForCallbacks(firstStart + 50)]);
   assertCallbackSequence(callbacks.slice(firstStart), 1, 25);
+
+  const stoppedRunEnd = callbacks.length;
+  await sendCommand('queue-before-stop-and-restart');
+  await delay(500);
+  if (callbacks.length !== stoppedRunEnd) {
+    throw new Error('A queued callback crossed a stop/start boundary');
+  }
+
+  const restartedRunStart = callbacks.length;
+  await Promise.all([runInput(1), waitForCallbacks(restartedRunStart + 2)]);
+  assertCallbackSequence(callbacks.slice(restartedRunStart), 1, 1);
 
   await sendCommand('unregister-all');
   const unregisteredCount = callbacks.length;
@@ -131,6 +145,7 @@ async function runTest() {
 
   if (!(await sendCommand('stop'))) throw new Error('Failed to stop hook');
   await sendCommand('start-and-register', 2);
+  await delay(500);
   const secondStart = callbacks.length;
   await Promise.all([runInput(5), waitForCallbacks(secondStart + 10)]);
   assertCallbackSequence(callbacks.slice(secondStart), 2, 5);
@@ -185,7 +200,10 @@ app.whenReady().then(() => {
       nodeIntegration: true,
       contextIsolation: false,
       sandbox: false,
-      additionalArguments: [`--hotkey-addon=${addonPath}`],
+      additionalArguments: [
+        `--hotkey-addon=${addonPath}`,
+        `--hotkey-input-helper=${inputHelperPath}`,
+      ],
     },
   });
   window.webContents.on('render-process-gone', (_event, details) => {
