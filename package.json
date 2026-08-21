@@ -13,13 +13,16 @@
   },
   "license": "GPL-3.0-or-later",
   "main": "main.js",
+  "scripts": {
+    "test": "node test/run_hotkey_tests.js"
+  },
   "devDependencies": {
     "colors": "^1.4.0",
+    "electron": "^29.4.3",
     "fs": "^0.0.1-security",
     "path": "^0.12.7",
     "shelljs": "^0.8.5",
-    "electron": "^29.4.3",
-    "underscore":"1.13.4"
+    "underscore": "1.13.4"
   },
   "dependencies": {
     "node-addon-api": "^7.1.1"

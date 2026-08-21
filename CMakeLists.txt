@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.14)
 project(node_libuiohook)
 
 if(APPLE)
@@ -22,6 +22,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 SET(NODEJS_URL "https://artifacts.electronjs.org/headers/dist" CACHE STRING "Node.JS URL")
 SET(NODEJS_NAME "iojs" CACHE STRING "Node.JS Name")
+# TODO: Remove the Electron 29 build target and package dependency as soon as the Electron 43 migration is complete.
 SET(NODEJS_VERSION "v29.4.3" CACHE STRING "Node.JS Version")
 
 include(NodeJS)
@@ -94,6 +95,11 @@ target_compile_definitions(
 	${PROJECT_NAME}
 	PRIVATE BUILDING_NODE_EXTENSION
 )
+
+option(NODE_LIBUIOHOOK_BUILD_TESTS "Build the Windows hotkey test helper" OFF)
+if(WIN32 AND NODE_LIBUIOHOOK_BUILD_TESTS)
+	add_executable(node_libuiohook_send_input "${PROJECT_SOURCE_DIR}/test/send_input_win.cpp")
+endif()
 
 set(CompilerFlags
         CMAKE_CXX_FLAGS

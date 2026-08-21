@@ -27,7 +27,7 @@ permissions:
 jobs:
   build:
     name: 'Build a package'
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v3
       - name: Show GitHub context
@@ -47,11 +47,46 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v1
       - name: Configure
-        run: cmake -H"${{ github.workspace }}" -B"${{env.BUILD_DIRECTORY}}" -G"Visual Studio 17 2022" -A x64 -DNODEJS_VERSION="${{env.ELECTRON_VERSION}}" -DCMAKE_INSTALL_PREFIX="${{env.INSTALL_PACKAGE_PATH}}"
+        run: cmake -H"${{ github.workspace }}" -B"${{env.BUILD_DIRECTORY}}" -G"Visual Studio 17 2022" -A x64 -DNODEJS_VERSION="${{env.ELECTRON_VERSION}}" -DNODE_LIBUIOHOOK_BUILD_TESTS=ON -DCMAKE_INSTALL_PREFIX="${{env.INSTALL_PACKAGE_PATH}}"
         env:
           INSTALL_PACKAGE_PATH: "${{env.BUILD_DIRECTORY}}/${{env.DISTRIBUTE_DIRECTORY}}/${{env.PACKAGE_DIRECTORY}}"
       - name: Build
         run: cmake --build "${{env.BUILD_DIRECTORY}}" --target install --config ${{env.BUILD_CONFIGURATION}}
+      # TODO: Remove the Electron 29 compatibility checks as soon as the Electron 43 migration is complete.
+      - name: Install exact Electron 29 test runtime
+        run: npm install --prefix "${{ runner.temp }}/electron29" --no-save electron@29.4.3
+      - name: Test hotkey callbacks with Electron 29
+        run: node test/run_electron_test.js "${{ runner.temp }}/electron29/node_modules/electron/dist/electron.exe" test/test_hotkey_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
+        env:
+          EXPECTED_ELECTRON_VERSION: '29.4.3'
+      - name: Test hotkey teardown with Electron 29
+        run: node test/run_electron_test.js "${{ runner.temp }}/electron29/node_modules/electron/dist/electron.exe" test/test_hotkey_teardown_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
+        env:
+          EXPECTED_ELECTRON_VERSION: '29.4.3'
+      - name: Test worker hotkey callbacks with Electron 29
+        run: node test/run_electron_test.js "${{ runner.temp }}/electron29/node_modules/electron/dist/electron.exe" test/test_hotkey_worker_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
+        env:
+          EXPECTED_ELECTRON_VERSION: '29.4.3'
+      - name: Install Node.js 22 for Electron 43
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+      - name: Install Electron 43 test runtime
+        run: |
+          npm install --prefix "${{ runner.temp }}/electron43" --no-save electron@43.2.0
+          npx --prefix "${{ runner.temp }}/electron43" install-electron --no
+      - name: Test hotkey callbacks with Electron 43
+        run: node test/run_electron_test.js "${{ runner.temp }}/electron43/node_modules/electron/dist/electron.exe" test/test_hotkey_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
+        env:
+          EXPECTED_ELECTRON_VERSION: '43.2.0'
+      - name: Test hotkey teardown with Electron 43
+        run: node test/run_electron_test.js "${{ runner.temp }}/electron43/node_modules/electron/dist/electron.exe" test/test_hotkey_teardown_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
+        env:
+          EXPECTED_ELECTRON_VERSION: '43.2.0'
+      - name: Test worker hotkey callbacks with Electron 43
+        run: node test/run_electron_test.js "${{ runner.temp }}/electron43/node_modules/electron/dist/electron.exe" test/test_hotkey_worker_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
+        env:
+          EXPECTED_ELECTRON_VERSION: '43.2.0'
       - name: Put version into package.json
         if: startsWith(github.ref, 'refs/tags/')
         run: node ci/bump-version.js "${{ steps.get_version.outputs.VERSION }}" "${{env.PACKAGE_PATH}}"

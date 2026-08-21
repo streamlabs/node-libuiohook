@@ -18,29 +18,29 @@
 
 #include "hook.h"
 
-#include <thread>
-#include <mutex>
-#include <iostream>
-#include <sstream>
+#include <atomic>
+#include <cstdint>
 #include <inttypes.h>
-#include <vector>
+#include <iostream>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <sstream>
+#include <thread>
+#include <vector>
 #include <windows.h>
-
-class Worker : public Napi::AsyncWorker {
-public:
-	Worker(Napi::Function &callback) : AsyncWorker(callback){};
-	virtual ~Worker(){};
-
-	void Execute(){};
-	void OnOK() { Callback().Call({}); };
-};
 
 typedef int16_t key_t;
 
+struct HotKeyCallback {
+	napi_ref callback = nullptr;
+	uint64_t generation = 0;
+};
+
 struct HotKey {
 	std::vector<std::pair<key_t, bool>> keys;
-	std::unique_ptr<Worker> cbDown, cbUp;
+	HotKeyCallback cbDown, cbUp;
 	bool wasDown = false;
 
 	static uint32_t Stringify(std::vector<std::pair<key_t, bool>> keys)
@@ -58,9 +58,175 @@ struct ThreadData {
 	std::mutex mtx;
 	std::thread worker;
 	std::map<uint32_t, HotKey> hotkeys;
+	napi_env env = nullptr;
+	napi_threadsafe_function dispatcher = nullptr;
+	uint64_t nextGeneration = 0;
+	uint64_t nextRunEpoch = 0;
+	// Zero means that no polling run is active. Each start gets a distinct
+	// epoch because queued TSFN events can outlive the producer thread.
+	uint64_t activeRunEpoch = 0;
+	std::atomic<bool> shutdown{false};
+};
 
-	bool shutdown = false;
-} gThreadData;
+enum class HotKeyEdge { Down, Up };
+
+struct HotKeyEvent {
+	uint32_t key;
+	HotKeyEdge edge;
+	uint64_t generation;
+	uint64_t runEpoch;
+};
+
+static HotKeyCallback &GetCallback(HotKey &hotkey, HotKeyEdge edge)
+{
+	return edge == HotKeyEdge::Down ? hotkey.cbDown : hotkey.cbUp;
+}
+
+static void DispatchHotKeyEvent(napi_env env, napi_value, void *context, void *data)
+{
+	std::unique_ptr<HotKeyEvent> event(static_cast<HotKeyEvent *>(data));
+	if (env == nullptr || event == nullptr)
+		return;
+
+	ThreadData *td = static_cast<ThreadData *>(context);
+	napi_value callback = nullptr;
+	{
+		std::unique_lock<std::mutex> ulock(td->mtx);
+		if (td->activeRunEpoch == 0 || td->activeRunEpoch != event->runEpoch)
+			return;
+
+		auto hotkey = td->hotkeys.find(event->key);
+		if (hotkey == td->hotkeys.end())
+			return;
+
+		HotKeyCallback &registered = GetCallback(hotkey->second, event->edge);
+		if (registered.callback == nullptr || registered.generation != event->generation)
+			return;
+
+		if (napi_get_reference_value(env, registered.callback, &callback) != napi_ok || callback == nullptr)
+			return;
+	}
+
+	napi_value receiver;
+	if (napi_get_undefined(env, &receiver) != napi_ok)
+		return;
+
+	napi_status status = napi_call_function(env, receiver, callback, 0, nullptr, nullptr);
+	if (status != napi_ok && status != napi_pending_exception)
+		napi_throw_error(env, nullptr, "Failed to invoke hotkey callback");
+}
+
+static void QueueHotKeyEvent(ThreadData *td, uint32_t key, HotKeyEdge edge, const HotKeyCallback &callback)
+{
+	if (td->dispatcher == nullptr || callback.callback == nullptr)
+		return;
+
+	HotKeyEvent *event = new (std::nothrow) HotKeyEvent{key, edge, callback.generation, td->activeRunEpoch};
+	if (event == nullptr)
+		return;
+
+	if (napi_call_threadsafe_function(td->dispatcher, event, napi_tsfn_nonblocking) != napi_ok)
+		delete event;
+}
+
+static void DeleteCallback(napi_env env, HotKeyCallback &callback)
+{
+	if (callback.callback != nullptr) {
+		napi_delete_reference(env, callback.callback);
+		callback.callback = nullptr;
+	}
+	callback.generation = 0;
+}
+
+static void ClearHotkeys(ThreadData *td)
+{
+	std::unique_lock<std::mutex> ulock(td->mtx);
+	for (auto &hotkey : td->hotkeys) {
+		DeleteCallback(td->env, hotkey.second.cbDown);
+		DeleteCallback(td->env, hotkey.second.cbUp);
+	}
+	td->hotkeys.clear();
+}
+
+static bool StopHotkeyThread(ThreadData *td)
+{
+	if (!td->worker.joinable())
+		return false;
+
+	td->shutdown.store(true, std::memory_order_release);
+	td->worker.join();
+
+	// Joining prevents new events but does not drain work already queued in the
+	// TSFN. Mark the run inactive so stopHook() is also a callback boundary.
+	std::unique_lock<std::mutex> ulock(td->mtx);
+	td->activeRunEpoch = 0;
+	return true;
+}
+
+static void CleanupHotkeyThread(void *data)
+{
+	ThreadData *td = static_cast<ThreadData *>(data);
+	StopHotkeyThread(td);
+	ClearHotkeys(td);
+	td->env = nullptr;
+
+	if (td->dispatcher != nullptr) {
+		napi_threadsafe_function dispatcher = td->dispatcher;
+		td->dispatcher = nullptr;
+		napi_release_threadsafe_function(dispatcher, napi_tsfn_abort);
+	}
+}
+
+static void FinalizeHotkeyThread(napi_env, void *data, void *)
+{
+	delete static_cast<ThreadData *>(data);
+}
+
+static ThreadData *ThrowInitializationError(Napi::Env env, const char *message)
+{
+	Napi::Error::New(env, message).ThrowAsJavaScriptException();
+	return nullptr;
+}
+
+ThreadData *InitializeHotkeyThread(Napi::Env env)
+{
+	ThreadData *td = new (std::nothrow) ThreadData;
+	if (td == nullptr)
+		return ThrowInitializationError(env, "Failed to allocate hotkey state");
+
+	Napi::Function callback = Napi::Function::New(env, [](const Napi::CallbackInfo &) {});
+	Napi::String resourceName = Napi::String::New(env, "node-libuiohook hotkey dispatcher");
+	td->env = env;
+
+	napi_status status =
+		napi_create_threadsafe_function(env, callback, nullptr, resourceName, 0, 1, td, FinalizeHotkeyThread, td, DispatchHotKeyEvent, &td->dispatcher);
+	if (status != napi_ok) {
+		delete td;
+		return ThrowInitializationError(env, "Failed to create the hotkey callback dispatcher");
+	}
+
+	status = napi_unref_threadsafe_function(env, td->dispatcher);
+	if (status != napi_ok) {
+		napi_threadsafe_function dispatcher = td->dispatcher;
+		td->dispatcher = nullptr;
+		td->env = nullptr;
+		napi_release_threadsafe_function(dispatcher, napi_tsfn_abort);
+		return ThrowInitializationError(env, "Failed to unreference the hotkey callback dispatcher");
+	}
+
+	// Cleanup hooks run in reverse registration order. Register this after the
+	// dispatcher so the polling thread is joined before Node tears it down.
+	status = napi_add_env_cleanup_hook(env, CleanupHotkeyThread, td);
+	if (status != napi_ok) {
+		napi_threadsafe_function dispatcher = td->dispatcher;
+		td->dispatcher = nullptr;
+		td->env = nullptr;
+		napi_release_threadsafe_function(dispatcher, napi_tsfn_abort);
+		return ThrowInitializationError(env, "Failed to register hotkey cleanup");
+	}
+
+	return td;
+}
 
 static bool isKeyDown(key_t k)
 {
@@ -76,7 +242,7 @@ static int32_t HotKeyThread(void *arg)
 		std::unique_lock<std::mutex> ulock(td->mtx);
 	}
 
-	while (!td->shutdown) {
+	while (!td->shutdown.load(std::memory_order_acquire)) {
 		// Test each hotkey
 		{
 			std::unique_lock<std::mutex> ulock(td->mtx);
@@ -97,13 +263,11 @@ static int32_t HotKeyThread(void *arg)
 				}
 
 				if (allPressed && !hk.second.wasDown) {
-					if (hk.second.cbDown != nullptr)
-						hk.second.cbDown->Queue();
+					QueueHotKeyEvent(td, hk.first, HotKeyEdge::Down, hk.second.cbDown);
 
 					hk.second.wasDown = true;
 				} else if (!allPressed && hk.second.wasDown) {
-					if (hk.second.cbUp != nullptr)
-						hk.second.cbUp->Queue();
+					QueueHotKeyEvent(td, hk.first, HotKeyEdge::Up, hk.second.cbUp);
 
 					hk.second.wasDown = false;
 				}
@@ -139,25 +303,25 @@ template<class ContainerT> void tokenize(const std::string &str, ContainerT &tok
 
 Napi::Value StartHotkeyThreadJS(const Napi::CallbackInfo &info)
 {
-	if (gThreadData.worker.joinable())
+	ThreadData *td = static_cast<ThreadData *>(info.Data());
+	if (td->worker.joinable())
 		return Napi::Boolean::New(info.Env(), false);
 
-	gThreadData.mtx.lock();
-	gThreadData.worker = std::thread(HotKeyThread, &gThreadData);
-	gThreadData.mtx.unlock();
+	std::unique_lock<std::mutex> ulock(td->mtx);
+	for (auto &hotkey : td->hotkeys)
+		hotkey.second.wasDown = false;
+	td->activeRunEpoch = ++td->nextRunEpoch;
+	if (td->activeRunEpoch == 0)
+		td->activeRunEpoch = ++td->nextRunEpoch;
+	td->shutdown.store(false, std::memory_order_release);
+	td->worker = std::thread(HotKeyThread, td);
 
 	return Napi::Boolean::New(info.Env(), true);
 }
 
 Napi::Value StopHotkeyThreadJS(const Napi::CallbackInfo &info)
 {
-	if (!gThreadData.worker.joinable())
-		return Napi::Boolean::New(info.Env(), false);
-
-	gThreadData.shutdown = true;
-	gThreadData.worker.join();
-
-	return Napi::Boolean::New(info.Env(), true);
+	return Napi::Boolean::New(info.Env(), StopHotkeyThread(static_cast<ThreadData *>(info.Data())));
 }
 
 std::vector<std::pair<key_t, bool>> StringToKeys(std::string keystr, Napi::Object modifiers)
@@ -424,6 +588,7 @@ std::vector<std::pair<key_t, bool>> StringToKeys(std::string keystr, Napi::Objec
 
 Napi::Value RegisterHotkeyJS(const Napi::CallbackInfo &info)
 {
+	ThreadData *td = static_cast<ThreadData *>(info.Data());
 	/* interface INodeLibuiohookBinding {
 	 *   callback: () => void;
 	 *   eventType: TKeyEventType;
@@ -445,53 +610,47 @@ Napi::Value RegisterHotkeyJS(const Napi::CallbackInfo &info)
 		return Napi::Boolean::New(info.Env(), false);
 
 	uint32_t key = HotKey::Stringify(keys);
-	if (gThreadData.hotkeys.count(key)) {
-		auto hk = gThreadData.hotkeys.find(key);
-
-		// Lock mutex for modifications
-
-		if (eventString == "registerKeydown") {
-			if (!hk->second.cbDown) {
-				// Lock mutex for modifications
-				std::unique_lock<std::mutex> ulock(gThreadData.mtx);
-				hk->second.cbDown = std::make_unique<Worker>(binds.Get("callback").As<Napi::Function>());
-				hk->second.cbDown->SuppressDestruct();
-			} else {
-				return Napi::Boolean::New(info.Env(), false);
-			}
-		} else if (eventString == "registerKeyup") {
-			if (!hk->second.cbUp) {
-				// Lock mutex for modifications
-				std::unique_lock<std::mutex> ulock(gThreadData.mtx);
-				hk->second.cbUp = std::make_unique<Worker>(binds.Get("callback").As<Napi::Function>());
-				hk->second.cbUp->SuppressDestruct();
-			} else {
-				return Napi::Boolean::New(info.Env(), false);
-			}
-		}
+	HotKeyEdge edge;
+	if (eventString == "registerKeydown") {
+		edge = HotKeyEdge::Down;
+	} else if (eventString == "registerKeyup") {
+		edge = HotKeyEdge::Up;
 	} else {
-		HotKey hk;
-		hk.keys = std::move(keys);
-		hk.wasDown = false;
-
-		if (eventString == "registerKeydown") {
-			hk.cbDown = std::make_unique<Worker>(binds.Get("callback").As<Napi::Function>());
-			hk.cbDown->SuppressDestruct();
-		} else if (eventString == "registerKeyup") {
-			hk.cbUp = std::make_unique<Worker>(binds.Get("callback").As<Napi::Function>());
-			hk.cbUp->SuppressDestruct();
-		}
-
-		// Lock mutex for modifications
-		std::unique_lock<std::mutex> ulock(gThreadData.mtx);
-		gThreadData.hotkeys.insert_or_assign(key, std::move(hk));
+		return Napi::Boolean::New(info.Env(), false);
 	}
+
+	Napi::Function callback = binds.Get("callback").As<Napi::Function>();
+	std::unique_lock<std::mutex> ulock(td->mtx);
+	auto hotkey = td->hotkeys.find(key);
+	if (hotkey == td->hotkeys.end()) {
+		HotKey registeredHotkey;
+		registeredHotkey.keys = std::move(keys);
+		hotkey = td->hotkeys.insert_or_assign(key, std::move(registeredHotkey)).first;
+	}
+
+	HotKeyCallback &registered = GetCallback(hotkey->second, edge);
+	if (registered.callback != nullptr)
+		return Napi::Boolean::New(info.Env(), false);
+
+	napi_status status = napi_create_reference(info.Env(), callback, 1, &registered.callback);
+	if (status != napi_ok) {
+		registered.callback = nullptr;
+		if (hotkey->second.cbDown.callback == nullptr && hotkey->second.cbUp.callback == nullptr)
+			td->hotkeys.erase(hotkey);
+		Napi::Error::New(info.Env(), "Failed to retain hotkey callback").ThrowAsJavaScriptException();
+		return Napi::Boolean::New(info.Env(), false);
+	}
+
+	registered.generation = ++td->nextGeneration;
+	if (registered.generation == 0)
+		registered.generation = ++td->nextGeneration;
 
 	return Napi::Boolean::New(info.Env(), true);
 }
 
 Napi::Value UnregisterHotkeyJS(const Napi::CallbackInfo &info)
 {
+	ThreadData *td = static_cast<ThreadData *>(info.Data());
 	Napi::Object binds = info[0].ToObject();
 	std::vector<std::pair<key_t, bool>> keys = StringToKeys(binds.Get("key").ToString().Utf8Value(), binds.Get("modifiers").ToObject());
 	std::string eventString = binds.Get("eventType").ToString().Utf8Value();
@@ -500,39 +659,38 @@ Napi::Value UnregisterHotkeyJS(const Napi::CallbackInfo &info)
 		return Napi::Boolean::New(info.Env(), false);
 
 	uint32_t key = HotKey::Stringify(keys);
-	if (!gThreadData.hotkeys.count(key)) {
+	std::unique_lock<std::mutex> ulock(td->mtx);
+	auto hk = td->hotkeys.find(key);
+	if (hk == td->hotkeys.end()) {
 		std::cout << "Cannot find key " << key << std::endl;
 		return Napi::Boolean::New(info.Env(), false);
 	}
-	// Lock mutex for modifications
-	std::unique_lock<std::mutex> ulock(gThreadData.mtx);
-
-	auto hk = gThreadData.hotkeys.find(key);
 
 	if (eventString == "registerKeydown") {
-		if (hk->second.cbDown) {
-			hk->second.cbDown = nullptr;
+		if (hk->second.cbDown.callback != nullptr) {
+			DeleteCallback(info.Env(), hk->second.cbDown);
 		} else {
 			return Napi::Boolean::New(info.Env(), false);
 		}
 	} else if (eventString == "registerKeyup") {
-		if (hk->second.cbUp) {
-			hk->second.cbUp = nullptr;
+		if (hk->second.cbUp.callback != nullptr) {
+			DeleteCallback(info.Env(), hk->second.cbUp);
 		} else {
 			return Napi::Boolean::New(info.Env(), false);
 		}
+	} else {
+		return Napi::Boolean::New(info.Env(), false);
 	}
 	// If both callbacks were removed, don't bother keeping the object around.
-	if ((hk->second.cbUp == nullptr) && (hk->second.cbDown == nullptr)) {
-		gThreadData.hotkeys.erase(key);
+	if (hk->second.cbUp.callback == nullptr && hk->second.cbDown.callback == nullptr) {
+		td->hotkeys.erase(key);
 	}
 	return Napi::Boolean::New(info.Env(), true);
 }
 
 Napi::Value UnregisterHotkeysJS(const Napi::CallbackInfo &info)
 {
-	std::unique_lock<std::mutex> ulock(gThreadData.mtx);
-	gThreadData.hotkeys.clear();
+	ClearHotkeys(static_cast<ThreadData *>(info.Data()));
 
 	return info.Env().Undefined();
 }
