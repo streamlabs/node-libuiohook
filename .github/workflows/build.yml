@@ -19,7 +19,7 @@ env:
   BUILD_DIRECTORY: "build"
   DISTRIBUTE_DIRECTORY: "distribute"
   RELEASE_BUCKET: "slobs-node-libuiohook"
-  ELECTRON_VERSION: "v29.4.3"
+  ELECTRON_VERSION: "v43.2.0"
 
 permissions:
   contents: read
@@ -38,10 +38,10 @@ jobs:
         id: get_version
         run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
         shell: bash
-      - name: Install Node.js
-        uses: actions/setup-node@v3
+      - name: Install Node.js 22 for Electron 43
+        uses: actions/setup-node@v4
         with:
-          node-version: '16.x'
+          node-version: '22.12.0'
       - name: Install dependencies
         run: yarn install --immutable --immutable-cache --check-cache
       - name: Add MSBuild to PATH
@@ -52,25 +52,6 @@ jobs:
           INSTALL_PACKAGE_PATH: "${{env.BUILD_DIRECTORY}}/${{env.DISTRIBUTE_DIRECTORY}}/${{env.PACKAGE_DIRECTORY}}"
       - name: Build
         run: cmake --build "${{env.BUILD_DIRECTORY}}" --target install --config ${{env.BUILD_CONFIGURATION}}
-      # TODO: Remove the Electron 29 compatibility checks as soon as the Electron 43 migration is complete.
-      - name: Install exact Electron 29 test runtime
-        run: npm install --prefix "${{ runner.temp }}/electron29" --no-save electron@29.4.3
-      - name: Test hotkey callbacks with Electron 29
-        run: node test/run_electron_test.js "${{ runner.temp }}/electron29/node_modules/electron/dist/electron.exe" test/test_hotkey_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
-        env:
-          EXPECTED_ELECTRON_VERSION: '29.4.3'
-      - name: Test hotkey teardown with Electron 29
-        run: node test/run_electron_test.js "${{ runner.temp }}/electron29/node_modules/electron/dist/electron.exe" test/test_hotkey_teardown_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
-        env:
-          EXPECTED_ELECTRON_VERSION: '29.4.3'
-      - name: Test worker hotkey callbacks with Electron 29
-        run: node test/run_electron_test.js "${{ runner.temp }}/electron29/node_modules/electron/dist/electron.exe" test/test_hotkey_worker_win.js build/RelWithDebInfo/node_libuiohook.node build/RelWithDebInfo/node_libuiohook_send_input.exe
-        env:
-          EXPECTED_ELECTRON_VERSION: '29.4.3'
-      - name: Install Node.js 22 for Electron 43
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22.12.0'
       - name: Install Electron 43 test runtime
         run: |
           npm install --prefix "${{ runner.temp }}/electron43" --no-save electron@43.2.0
@@ -193,10 +174,10 @@ jobs:
         id: get_version
         run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
         shell: bash
-      - name: Install Node.js
-        uses: actions/setup-node@v3
+      - name: Install Node.js 22 for Electron 43
+        uses: actions/setup-node@v4
         with:
-          node-version: '16.x'
+          node-version: '22.12.0'
       - name: Install dependencies
         run: yarn install --immutable --immutable-cache --check-cache
       - name: Build

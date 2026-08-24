@@ -5,13 +5,6 @@ if(APPLE)
 	if (NOT CMAKE_OSX_ARCHITECTURES)
 		set(CMAKE_OSX_ARCHITECTURES "${CMAKE_HOST_SYSTEM_PROCESSOR}")
 	endif()
-	if (NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-		if ("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
-			set(CMAKE_OSX_DEPOLYMENT_TARGET "11.0")
-		else()
-			set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
-		endif()
-	endif()
 endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
@@ -22,8 +15,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 SET(NODEJS_URL "https://artifacts.electronjs.org/headers/dist" CACHE STRING "Node.JS URL")
 SET(NODEJS_NAME "iojs" CACHE STRING "Node.JS Name")
-# TODO: Remove the Electron 29 build target and package dependency as soon as the Electron 43 migration is complete.
-SET(NODEJS_VERSION "v29.4.3" CACHE STRING "Node.JS Version")
+SET(NODEJS_VERSION "v43.2.0" CACHE STRING "Node.JS Version")
 
 include(NodeJS)
 include(CPack)
