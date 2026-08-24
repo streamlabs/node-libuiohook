@@ -11,8 +11,13 @@ fi
 export DEPS="libuiohook-osx-1.2.2-b230208-${ARCHITECTURE}"
 wget --quiet --retry-connrefused --waitretry=1 https://obs-studio-deployment.s3-us-west-2.amazonaws.com/libuiohook-osx-1.2.2-b230208-${ARCHITECTURE}.tar.gz
 
-mkdir build
-cd build
+if [ ! -n "${BUILD_DIRECTORY}" ]
+then
+    BUILD_DIRECTORY="build"
+fi
+
+mkdir ${BUILD_DIRECTORY}
+cd ${BUILD_DIRECTORY}
 
 mkdir deps
 tar -xf ../${DEPS}.tar.gz -C ./deps
@@ -27,10 +32,6 @@ fi
 if [ ! -n "${DISTRIBUTE_DIRECTORY}" ]
 then
     DISTRIBUTE_DIRECTORY="distribute"
-fi
-if [ ! -n "${BUILD_DIRECTORY}" ]
-then
-    BUILD_DIRECTORY="build"
 fi
 
 # Configure
