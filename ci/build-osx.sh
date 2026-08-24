@@ -45,17 +45,17 @@ ${NODEJS_VERSION_PARAM} \
 cd ..
 
 # Build
-cmake --build build --target install --config RelWithDebInfo
+cmake --build ${BUILD_DIRECTORY} --target install --config RelWithDebInfo
 
 # Configure loading path
 sudo install_name_tool -change \
 @rpath/libuiohook.1.dylib \
 ./node_modules/node-libuiohook/libuiohook.1.dylib \
-./build/${DISTRIBUTE_DIRECTORY}/node-libuiohook/node_libuiohook.node
+./${BUILD_DIRECTORY}/${DISTRIBUTE_DIRECTORY}/node-libuiohook/node_libuiohook.node
 
 #Upload debug files
 curl -sL https://sentry.io/get-cli/ | bash
 dsymutil $PWD/${BUILD_DIRECTORY}/RelWithDebInfo/node_libuiohook.node
 sentry-cli --auth-token ${SENTRY_AUTH_TOKEN} upload-dif --org streamlabs-desktop --project obs-client $PWD/${BUILD_DIRECTORY}/RelWithDebInfo/node_libuiohook.node.dSYM/Contents/Resources/DWARF/node_libuiohook.node 
 
-rm -rf ./build/deps
+rm -rf ./${BUILD_DIRECTORY}/deps

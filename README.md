@@ -13,10 +13,10 @@ cmake --build . --target install --config RelWithDebInfo
 ```
 
 ## Build for MacOS
-Note: when you run `ci/build-osx.sh` script, it will request Adminstrator access since it is intended to be run in a CI environment.
+Note: when you run `ci/build-osx.sh` script, it will request Admin access since it is intended to be run in a CI environment.
 ```
-ci/build-osx.sh
 yarn install
+ci/build-osx.sh
 ```
 
 ## Test
