@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "colors": "^1.4.0",
-    "electron": "^29.4.3",
+    "electron": "43.2.0",
     "fs": "^0.0.1-security",
     "path": "^0.12.7",
     "shelljs": "^0.8.5",

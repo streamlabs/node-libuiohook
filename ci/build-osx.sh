@@ -24,6 +24,15 @@ else
     NODEJS_VERSION_PARAM=""
 fi
 
+if [ ! -n "${DISTRIBUTE_DIRECTORY}" ]
+then
+    DISTRIBUTE_DIRECTORY="distribute"
+fi
+if [ ! -n "${BUILD_DIRECTORY}" ]
+then
+    BUILD_DIRECTORY="build"
+fi
+
 # Configure
 cmake .. \
 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
