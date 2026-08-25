@@ -1,6 +1,4 @@
 cmake_minimum_required(VERSION 3.14)
-project(node_libuiohook)
-
 if(APPLE)
 	if (NOT CMAKE_OSX_ARCHITECTURES)
 		set(CMAKE_OSX_ARCHITECTURES "${CMAKE_HOST_SYSTEM_PROCESSOR}")
@@ -13,6 +11,7 @@ if(APPLE)
 		endif()
 	endif()
 endif()
+project(node_libuiohook)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
