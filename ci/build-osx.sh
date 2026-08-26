@@ -34,15 +34,8 @@ then
     DISTRIBUTE_DIRECTORY="distribute"
 fi
 
-if [ ! -n "${CMAKE_OSX_DEPLOYMENT_TARGET}" ]
-then
-    echo "CMAKE_OSX_DEPLOYMENT_TARGET is not set, defaulting to 11.0"
-    CMAKE_OSX_DEPLOYMENT_TARGET="11.0"
-fi
-
 # Configure
 cmake .. \
--DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET} \
 -DUIOHOOKDIR=${PWD}/deps/${DEPS} \
 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 ${NODEJS_VERSION_PARAM} \
