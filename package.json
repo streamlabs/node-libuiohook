@@ -9,7 +9,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git@github.com:stream-labs/node-libuiohook.git"
+    "url": "git@github.com:streamlabs/node-libuiohook.git"
   },
   "license": "GPL-3.0-or-later",
   "main": "main.js",
